@@ -5,7 +5,7 @@ mock_provider "aws" {}
 # These variables apply to ALL run blocks in this file (unless overridden).
 # They're the minimum required inputs for our module.
 variables {
-  name_prefix        = "cc-test-scheduler"
+  name_prefix         = "cc-test-scheduler"
   automation_role_arn = "arn:aws:iam::123456789012:role/test-role"
 }
 
