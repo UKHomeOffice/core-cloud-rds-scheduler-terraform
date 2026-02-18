@@ -1,4 +1,4 @@
-name: Validate Terraform with Trivy
+name: Validate Terraform with Trivy and TEST
 
 on:
   push:
@@ -8,6 +8,9 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  security-events: write
+  id-token: write
 
 jobs:
   RunTerraformValidation:
@@ -17,6 +20,21 @@ jobs:
     steps:
       - name: Clone the Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd   #v3
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Test
+        run: terraform test -verbose
 
       # Results have to be a table as the organisation does not have Advanced Security license.
       - name: Terraform Trivy Scan
