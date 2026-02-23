@@ -70,14 +70,20 @@ resource "aws_ssm_association" "stop_rds_instances" {
 resource "aws_ssm_association" "start_aurora_clusters" {
   for_each = local.weekdays
 
-  name                = aws_ssm_document.aurora_cluster_scheduler.name
-  association_name    = "${var.name_prefix}-start-aurora-clusters-${lower(each.key)}"
-  schedule_expression = "cron(${var.start_aurora_minute} ${var.start_aurora_hour} ? * ${each.key} *)"
+  name                             = aws_ssm_document.aurora_cluster_scheduler.name
+  association_name                 = "${var.name_prefix}-start-aurora-clusters-${lower(each.key)}"
+  schedule_expression              = "cron(${var.start_aurora_minute} ${var.start_aurora_hour} ? * ${each.key} *)"
+  automation_target_parameter_name = "TargetKey"
 
   parameters = {
     AutomationAssumeRole = var.automation_role_arn
     Action               = "Start"
     ScheduleTagKey       = var.schedule_tag_key
+  }
+  # "ParameterValues" passes a literal value rather than performing a resource lookup, so SSM runs the automation once (not once-per-resource). The script ignores TargetKey
+  targets {
+    key    = "ParameterValues"
+    values = ["placeholder"]
   }
 }
 
@@ -93,7 +99,13 @@ resource "aws_ssm_association" "stop_aurora_clusters" {
     Action               = "Stop"
     ScheduleTagKey       = var.schedule_tag_key
   }
+  # "ParameterValues" passes a literal value rather than performing a resource lookup, so SSM runs the automation once (not once-per-resource). The script ignores TargetKey
+  targets {
+    key    = "ParameterValues"
+    values = ["placeholder"]
+  }
 }
+
 
 # ------------------------------------------------------------------------------
 # SSM Automation Document — Aurora Cluster Discovery + Stop/Start
@@ -126,6 +138,11 @@ resource "aws_ssm_document" "aurora_cluster_scheduler" {
         type        = "String"
         description = "The tag key used to identify opt-in clusters."
         default     = "Schedule"
+      }
+      TargetKey = {
+        type        = "StringList"
+        description = "Reserved — not used by the script. Required by the SSM UpdateAssociation API when automation_target_parameter_name is set."
+        default     = ["placeholder"]
       }
     }
 
