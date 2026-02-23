@@ -4,20 +4,30 @@
 # Uses AWS SSM State Manager to stop/start RDS instances and Aurora clusters
 # on a schedule. Resources opt-in by having a "Schedule" tag.
 #
+# SSM associations only support single days (e.g. MON), not ranges (MON-FRI).
+# Workaround: one association per weekday via for_each.
+#
+#
 # - RDS Instances: Uses AWS managed documents (AWS-StartRdsInstance/AWS-StopRdsInstance)
 # - Aurora Clusters: Uses a custom SSM Automation Document (clusters can't be
 #   targeted by tag natively)
 ################################################################################
 
+locals {
+  weekdays = toset(["MON", "TUE", "WED", "THU", "FRI"])
+}
+
 # ------------------------------------------------------------------------------
 # SSM Associations — RDS Instances (AWS Managed Documents)
+# One association per weekday.
 # ------------------------------------------------------------------------------
 
-#checkov:skip=CCL_COSMOS_FINOPS_TAGS:SSM associations do not support tags - AWS resource limitation
 resource "aws_ssm_association" "start_rds_instances" {
+  for_each = local.weekdays
+
   name                = "AWS-StartRdsInstance"
-  association_name    = "${var.name_prefix}-start-rds-instances"
-  schedule_expression = var.start_schedule
+  association_name    = "${var.name_prefix}-start-rds-instances-${lower(each.key)}"
+  schedule_expression = "cron(${var.start_rds_minute} ${var.start_rds_hour} ? * ${each.key} *)"
 
   parameters = {
     InstanceId           = ""
@@ -32,11 +42,12 @@ resource "aws_ssm_association" "start_rds_instances" {
   automation_target_parameter_name = "InstanceId"
 }
 
-#checkov:skip=CCL_COSMOS_FINOPS_TAGS:SSM associations do not support tags - AWS resource limitation
 resource "aws_ssm_association" "stop_rds_instances" {
+  for_each = local.weekdays
+
   name                = "AWS-StopRdsInstance"
-  association_name    = "${var.name_prefix}-stop-rds-instances"
-  schedule_expression = var.stop_schedule
+  association_name    = "${var.name_prefix}-stop-rds-instances-${lower(each.key)}"
+  schedule_expression = "cron(${var.stop_rds_minute} ${var.stop_rds_hour} ? * ${each.key} *)"
 
   parameters = {
     InstanceId           = ""
@@ -53,33 +64,49 @@ resource "aws_ssm_association" "stop_rds_instances" {
 
 # ------------------------------------------------------------------------------
 # SSM Associations — Aurora Clusters (Custom Document)
+# One association per weekday.
 # ------------------------------------------------------------------------------
 
-#checkov:skip=CCL_COSMOS_FINOPS_TAGS:SSM associations do not support tags - AWS resource limitation
 resource "aws_ssm_association" "start_aurora_clusters" {
-  name                = aws_ssm_document.aurora_cluster_scheduler.name
-  association_name    = "${var.name_prefix}-start-aurora-clusters"
-  schedule_expression = var.aurora_start_schedule
+  for_each = local.weekdays
+
+  name                             = aws_ssm_document.aurora_cluster_scheduler.name
+  association_name                 = "${var.name_prefix}-start-aurora-clusters-${lower(each.key)}"
+  schedule_expression              = "cron(${var.start_aurora_minute} ${var.start_aurora_hour} ? * ${each.key} *)"
+  automation_target_parameter_name = "TargetKey"
 
   parameters = {
     AutomationAssumeRole = var.automation_role_arn
     Action               = "Start"
     ScheduleTagKey       = var.schedule_tag_key
   }
+  # "ParameterValues" passes a literal value rather than performing a resource lookup, so SSM runs the automation once (not once-per-resource). The script ignores TargetKey
+  targets {
+    key    = "ParameterValues"
+    values = ["placeholder"]
+  }
 }
 
-#checkov:skip=CCL_COSMOS_FINOPS_TAGS:SSM associations do not support tags - AWS resource limitation
 resource "aws_ssm_association" "stop_aurora_clusters" {
-  name                = aws_ssm_document.aurora_cluster_scheduler.name
-  association_name    = "${var.name_prefix}-stop-aurora-clusters"
-  schedule_expression = var.aurora_stop_schedule
+  for_each = local.weekdays
+
+  name                             = aws_ssm_document.aurora_cluster_scheduler.name
+  association_name                 = "${var.name_prefix}-stop-aurora-clusters-${lower(each.key)}"
+  schedule_expression              = "cron(${var.stop_aurora_minute} ${var.stop_aurora_hour} ? * ${each.key} *)"
+  automation_target_parameter_name = "TargetKey"
 
   parameters = {
     AutomationAssumeRole = var.automation_role_arn
     Action               = "Stop"
     ScheduleTagKey       = var.schedule_tag_key
   }
+  # "ParameterValues" passes a literal value rather than performing a resource lookup, so SSM runs the automation once (not once-per-resource). The script ignores TargetKey
+  targets {
+    key    = "ParameterValues"
+    values = ["placeholder"]
+  }
 }
+
 
 # ------------------------------------------------------------------------------
 # SSM Automation Document — Aurora Cluster Discovery + Stop/Start
@@ -112,6 +139,11 @@ resource "aws_ssm_document" "aurora_cluster_scheduler" {
         type        = "String"
         description = "The tag key used to identify opt-in clusters."
         default     = "Schedule"
+      }
+      TargetKey = {
+        type        = "StringList"
+        description = "Reserved — not used by the script. Required by the SSM UpdateAssociation API when automation_target_parameter_name is set."
+        default     = ["placeholder"]
       }
     }
 

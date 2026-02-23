@@ -31,55 +31,103 @@ variable "schedule_tag_key" {
 
 # ------------------------------------------------------------------------------
 # Schedules — RDS Instances
-# Instances start/stop before clusters to allow dependency ordering.
+#
+# SSM association cron is built in main.tf as:
+#   cron(<minute> <hour> ? * <DAY> *)
+# The day-of-week is handled by for_each (MON-FRI individually).
+# Only hour and minute are configurable here.
 # ------------------------------------------------------------------------------
 
-variable "start_schedule" {
-  description = "Cron expression (UTC) for starting RDS instances."
-  type        = string
-  default     = "cron(0 8 ? * MON-FRI *)"
+variable "start_rds_hour" {
+  description = "UTC hour (0-23) to start RDS instances on weekdays."
+  type        = number
+  default     = 8
 
   validation {
-    condition     = can(regex("^(cron|rate)\\(.*\\)$", var.start_schedule))
-    error_message = "start_schedule must be a valid cron() or rate() expression."
+    condition     = var.start_rds_hour >= 0 && var.start_rds_hour <= 23
+    error_message = "start_rds_hour must be between 0 and 23."
   }
 }
 
-variable "stop_schedule" {
-  description = "Cron expression (UTC) for stopping RDS instances."
-  type        = string
-  default     = "cron(0 18 ? * MON-FRI *)"
+variable "start_rds_minute" {
+  description = "UTC minute (0-59) to start RDS instances on weekdays."
+  type        = number
+  default     = 0
 
   validation {
-    condition     = can(regex("^(cron|rate)\\(.*\\)$", var.stop_schedule))
-    error_message = "stop_schedule must be a valid cron() or rate() expression."
+    condition     = var.start_rds_minute >= 0 && var.start_rds_minute <= 59
+    error_message = "start_rds_minute must be between 0 and 59."
+  }
+}
+
+variable "stop_rds_hour" {
+  description = "UTC hour (0-23) to stop RDS instances on weekdays."
+  type        = number
+  default     = 18
+
+  validation {
+    condition     = var.stop_rds_hour >= 0 && var.stop_rds_hour <= 23
+    error_message = "stop_rds_hour must be between 0 and 23."
+  }
+}
+
+variable "stop_rds_minute" {
+  description = "UTC minute (0-59) to stop RDS instances on weekdays."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.stop_rds_minute >= 0 && var.stop_rds_minute <= 59
+    error_message = "stop_rds_minute must be between 0 and 59."
   }
 }
 
 # ------------------------------------------------------------------------------
 # Schedules — Aurora Clusters
-# Offset from instance schedules to allow time for instance state transitions.
+# Same window as instances: all RDS up 8am–6pm UTC.
 # ------------------------------------------------------------------------------
 
-variable "aurora_start_schedule" {
-  description = "Cron expression (UTC) for starting Aurora clusters. Defaults to 1 hour after instance start."
-  type        = string
-  default     = "cron(0 9 ? * MON-FRI *)"
+variable "start_aurora_hour" {
+  description = "UTC hour (0-23) to start Aurora clusters on weekdays."
+  type        = number
+  default     = 8
 
   validation {
-    condition     = can(regex("^(cron|rate)\\(.*\\)$", var.aurora_start_schedule))
-    error_message = "aurora_start_schedule must be a valid cron() or rate() expression."
+    condition     = var.start_aurora_hour >= 0 && var.start_aurora_hour <= 23
+    error_message = "start_aurora_hour must be between 0 and 23."
   }
 }
 
-variable "aurora_stop_schedule" {
-  description = "Cron expression (UTC) for stopping Aurora clusters. Defaults to 1 hour before instance stop."
-  type        = string
-  default     = "cron(0 17 ? * MON-FRI *)"
+variable "start_aurora_minute" {
+  description = "UTC minute (0-59) to start Aurora clusters on weekdays."
+  type        = number
+  default     = 0
 
   validation {
-    condition     = can(regex("^(cron|rate)\\(.*\\)$", var.aurora_stop_schedule))
-    error_message = "aurora_stop_schedule must be a valid cron() or rate() expression."
+    condition     = var.start_aurora_minute >= 0 && var.start_aurora_minute <= 59
+    error_message = "start_aurora_minute must be between 0 and 59."
+  }
+}
+
+variable "stop_aurora_hour" {
+  description = "UTC hour (0-23) to stop Aurora clusters on weekdays."
+  type        = number
+  default     = 18
+
+  validation {
+    condition     = var.stop_aurora_hour >= 0 && var.stop_aurora_hour <= 23
+    error_message = "stop_aurora_hour must be between 0 and 23."
+  }
+}
+
+variable "stop_aurora_minute" {
+  description = "UTC minute (0-59) to stop Aurora clusters on weekdays."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.stop_aurora_minute >= 0 && var.stop_aurora_minute <= 59
+    error_message = "stop_aurora_minute must be between 0 and 59."
   }
 }
 

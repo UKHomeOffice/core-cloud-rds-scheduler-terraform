@@ -97,22 +97,29 @@ module "rds_scheduled_stop_start" {
   automation_role_arn = aws_iam_role.ssm_rds_scheduler.arn
   schedule_tag_key    = "Schedule"
 
-  start_schedule        = "rate(30 minutes)"
-  stop_schedule         = "rate(30 minutes)"
-  aurora_start_schedule = "rate(30 minutes)"
-  aurora_stop_schedule  = "rate(30 minutes)"
+  # Defaults: all RDS up 8am-6pm UTC weekdays
+  # start_rds_hour       = 8   (default)
+  # stop_rds_hour        = 18  (default)
+  # start_aurora_hour    = 8   (default)
+  # stop_aurora_hour     = 18  (default)
 
   tags = local.common_tags
 }
 
-# ------------------------------------------------------------------------------
-# Outputs
-# ------------------------------------------------------------------------------
+# module "rds_scheduled_stop_start" {
+#   count = local.hasFeature.enableRDSScheduledStopStart ? 1 : 0
 
-output "ssm_document_name" {
-  value = module.rds_scheduled_stop_start.ssm_document_name
-}
+#   source = "../modules/rds-scheduled-stop-start"
 
-output "iam_role_arn" {
-  value = aws_iam_role.ssm_rds_scheduler.arn
-}
+#   name_prefix        = "cc-rds-scheduler"
+#   automation_role_arn = aws_iam_role.ssm_rds_scheduled_stop_start[0].arn
+#   schedule_tag_key   = "Schedule"
+
+#   # Defaults: all RDS up 8am-6pm UTC weekdays
+#   # start_rds_hour       = 8   (default)
+#   # stop_rds_hour        = 18  (default)
+#   # start_aurora_hour    = 8   (default)
+#   # stop_aurora_hour     = 18  (default)
+
+#   tags = merge(local.cc_common_tags)
+# }
