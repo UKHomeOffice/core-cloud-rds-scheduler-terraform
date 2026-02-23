@@ -90,9 +90,10 @@ resource "aws_ssm_association" "start_aurora_clusters" {
 resource "aws_ssm_association" "stop_aurora_clusters" {
   for_each = local.weekdays
 
-  name                = aws_ssm_document.aurora_cluster_scheduler.name
-  association_name    = "${var.name_prefix}-stop-aurora-clusters-${lower(each.key)}"
-  schedule_expression = "cron(${var.stop_aurora_minute} ${var.stop_aurora_hour} ? * ${each.key} *)"
+  name                             = aws_ssm_document.aurora_cluster_scheduler.name
+  association_name                 = "${var.name_prefix}-stop-aurora-clusters-${lower(each.key)}"
+  schedule_expression              = "cron(${var.stop_aurora_minute} ${var.stop_aurora_hour} ? * ${each.key} *)"
+  automation_target_parameter_name = "TargetKey"
 
   parameters = {
     AutomationAssumeRole = var.automation_role_arn
