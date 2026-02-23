@@ -11,10 +11,11 @@ module "rds_scheduled_stop_start" {
   automation_role_arn = aws_iam_role.ssm_rds_scheduler.arn
   schedule_tag_key   = "Schedule"
 
-  start_schedule        = "cron(0 8 ? * MON-FRI *)"
-  stop_schedule         = "cron(0 18 ? * MON-FRI *)"
-  aurora_start_schedule = "cron(0 9 ? * MON-FRI *)"
-  aurora_stop_schedule  = "cron(0 17 ? * MON-FRI *)"
+  # Defaults: all RDS up 8am-6pm UTC weekdays
+  # start_rds_hour       = 8   (default)
+  # stop_rds_hour        = 18  (default)
+  # start_aurora_hour    = 8   (default)
+  # stop_aurora_hour     = 18  (default)
 
   tags = {
     cost-centre  = "1709144"
@@ -29,42 +30,80 @@ module "rds_scheduled_stop_start" {
 **Note:** This module does NOT create the IAM role. The calling code must create it with the correct tag-based condition. See [IAM Role Requirements](#iam-role-requirements) below.
 
 ## Architecture
+
 ```
-SSM State Manager
+SSM State Manager (20 associations: 4 actions x 5 weekdays)
 ├── RDS Instances (AWS managed documents)
-│   ├── AWS-StartRdsInstance  →  targets by tag-key "Schedule"
-│   └── AWS-StopRdsInstance   →  targets by tag-key "Schedule"
+│   ├── AWS-StartRdsInstance  →  targets by tag-key "Schedule"  (MON-FRI)
+│   └── AWS-StopRdsInstance   →  targets by tag-key "Schedule"  (MON-FRI)
 │
 └── Aurora Clusters (custom automation document)
-    └── Python script:
+    └── cc-rds-scheduler-aurora-cluster-scheduler
         ├── Discovers clusters via DescribeDBClusters API
         ├── Filters by "Schedule" tag
         ├── Filters out unstoppable types (serverless, global, etc.)
         └── Calls StartDBCluster / StopDBCluster
 ```
 
-### Why two approaches?
+### Why 20 associations?
 
-SSM State Manager can target RDS **instances** by tag natively. Aurora **clusters** cannot be targeted by tag, so a custom SSM Automation Document discovers them via API calls.
+SSM State Manager associations only support single day-of-week values (e.g. `MON`), not ranges (e.g. `MON-FRI`). Ranges are only supported for maintenance windows. The module uses `for_each` to create one association per weekday for each action (start/stop x instances/clusters = 4 actions x 5 days = 20).
+
+### SSM Cron Format
+
+SSM associations use **6-field cron** (seconds field is optional):
+
+```
+cron(minutes hours day_of_month month day_of_week year)
+```
+
+Example: `cron(0 8 ? * MON *)` = every Monday at 08:00 UTC.
 
 ### Schedule staggering
 
-| Time (UTC) | Action |
-|---|---|
-| 08:00 MON-FRI | Start RDS instances |
-| 09:00 MON-FRI | Start Aurora clusters |
-| 17:00 MON-FRI | Stop Aurora clusters |
-| 18:00 MON-FRI | Stop RDS instances |
+| Time (UTC) | Action | Days |
+|---|---|---|
+| 08:00 | Start RDS instances + Aurora clusters | MON-FRI |
+| 18:00 | Stop RDS instances + Aurora clusters | MON-FRI |
+
+All RDS databases are available 8am–6pm UTC weekdays. Nothing runs on weekends.
 
 ## Opting in a database
 
 Add a `Schedule` tag to any RDS instance or Aurora cluster:
+
 ```
 Tag Key:   Schedule
-Tag Value: <any value, e.g. "true" or "weekdays">
+Tag Value: <any value, e.g. "weekdays" or "true">
 ```
 
-To opt out, remove the tag.
+The IAM policy restricts stop/start to resources with this tag — untagged resources cannot be affected.
+
+## Inputs
+
+| Name | Description | Default |
+|---|---|---|
+| `name_prefix` | Prefix for all resource names | — (required) |
+| `automation_role_arn` | IAM role ARN for SSM to assume | — (required) |
+| `schedule_tag_key` | Tag key for opt-in | `Schedule` |
+| `start_rds_hour` | UTC hour to start instances | `8` |
+| `start_rds_minute` | UTC minute to start instances | `0` |
+| `stop_rds_hour` | UTC hour to stop instances | `18` |
+| `stop_rds_minute` | UTC minute to stop instances | `0` |
+| `start_aurora_hour` | UTC hour to start clusters | `8` |
+| `start_aurora_minute` | UTC minute to start clusters | `0` |
+| `stop_aurora_hour` | UTC hour to stop clusters | `18` |
+| `stop_aurora_minute` | UTC minute to stop clusters | `0` |
+| `tags` | Tags for module-created resources | `{}` |
+
+## Testing
+
+```bash
+terraform init
+terraform test            # run all tests
+terraform test -verbose   # show each assertion
+```
+
 
 ## IAM Role Requirements
 
@@ -128,36 +167,3 @@ resource "aws_iam_role_policy" "ssm_rds_scheduler" {
   })
 }
 ```
-
-## Inputs
-
-| Name | Description | Type | Default | Required |
-|---|---|---|---|---|
-| `name_prefix` | Prefix for all resource names | `string` | — | Yes |
-| `automation_role_arn` | IAM role ARN for SSM to assume | `string` | — | Yes |
-| `schedule_tag_key` | Tag key for opt-in filtering | `string` | `Schedule` | No |
-| `start_schedule` | Cron for starting RDS instances | `string` | `cron(0 8 ? * MON-FRI *)` | No |
-| `stop_schedule` | Cron for stopping RDS instances | `string` | `cron(0 18 ? * MON-FRI *)` | No |
-| `aurora_start_schedule` | Cron for starting Aurora clusters | `string` | `cron(0 9 ? * MON-FRI *)` | No |
-| `aurora_stop_schedule` | Cron for stopping Aurora clusters | `string` | `cron(0 17 ? * MON-FRI *)` | No |
-| `tags` | Tags for module-created resources | `map(string)` | `{}` | No |
-
-## Outputs
-
-| Name | Description |
-|---|---|
-| `ssm_document_name` | Name of the custom SSM Automation Document |
-| `instance_start_association_id` | SSM Association ID for instance start |
-| `instance_stop_association_id` | SSM Association ID for instance stop |
-| `aurora_start_association_id` | SSM Association ID for cluster start |
-| `aurora_stop_association_id` | SSM Association ID for cluster stop |
-
-## Cluster eligibility
-
-The Python script skips clusters that cannot be stopped (matching PoC logic):
-
-- Serverless v1 (`engine_mode = serverless`)
-- Multi-master (`engine_mode = multimaster`)
-- Parallel query (`engine_mode = parallelquery`)
-- Global database (`engine_mode = global`)
-- Multi-AZ DB Clusters (non-Aurora, detected by `DBClusterInstanceClass`)
