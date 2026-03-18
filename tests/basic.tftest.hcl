@@ -93,6 +93,7 @@ run "creates_association_per_weekday" {
     error_message = "Should create 5 stop Aurora associations (one per weekday)"
   }
 }
+
 # TEST 4: Default schedules are weekday-only
 
 run "default_schedules_are_weekday_only" {
@@ -214,7 +215,7 @@ run "instance_associations_target_by_tag" {
 
 
 
-# TEST 6: IAM role ARN is passed to all 4 associations .Every association needs the IAM role so SSM can assume it. If one
+# TEST 6: IAM role ARN is passed to all 4 associations.Every association needs the IAM role so SSM can assume it.
 
 run "role_arn_passed_to_all_associations" {
   command = plan
@@ -257,12 +258,63 @@ run "empty_tags_are_valid" {
 }
 
 
-# TEST 7: Module outputs return expected values. Consumers of this module depend on these outputs 
+# TEST 8: Module outputs return expected values. Consumers of this module depend on these outputs 
 run "outputs_are_populated" {
   command = plan
 
   assert {
     condition     = output.ssm_document_name == "cc-test-scheduler-aurora-cluster-scheduler"
     error_message = "ssm_document_name output should match document name"
+  }
+}
+
+
+# TEST 9: Additional association/document checks (ParameterValues, automation_target_parameter_name, document content)
+run "association_and_document_checks" {
+  command = plan
+
+  # Aurora associations use the ParameterValues "one-shot" hack so the
+  # automation script discovers clusters itself.
+  assert {
+    condition     = aws_ssm_association.start_aurora_clusters["MON"].targets[0].key == "ParameterValues"
+    error_message = "Aurora start association should target via ParameterValues"
+  }
+
+  assert {
+    condition     = contains(aws_ssm_association.start_aurora_clusters["MON"].targets[0].values, "placeholder")
+    error_message = "Aurora start association should include a placeholder ParameterValues entry"
+  }
+
+  assert {
+    condition     = aws_ssm_association.stop_aurora_clusters["MON"].targets[0].key == "ParameterValues"
+    error_message = "Aurora stop association should target via ParameterValues"
+  }
+
+  assert {
+    condition     = contains(aws_ssm_association.stop_aurora_clusters["MON"].targets[0].values, "placeholder")
+    error_message = "Aurora stop association should include a placeholder ParameterValues entry"
+  }
+
+  # automation_target_parameter_name must be set correctly
+  assert {
+    condition     = aws_ssm_association.start_aurora_clusters["MON"].automation_target_parameter_name == "TargetKey"
+    error_message = "Aurora associations should set automation_target_parameter_name to TargetKey"
+  }
+
+  assert {
+    condition     = aws_ssm_association.start_rds_instances["MON"].automation_target_parameter_name == "InstanceId"
+    error_message = "RDS instance associations should set automation_target_parameter_name to InstanceId"
+  }
+
+  # The automation document content should expose the expected outputs and
+  # include the embedded script text (we check for a known function signature).
+  assert {
+    condition     = length(regexall("ProcessedClusters", aws_ssm_document.aurora_cluster_scheduler.content)) > 0
+    error_message = "Automation document should include ProcessedClusters output"
+  }
+
+  assert {
+    condition     = length(regexall("def handler", aws_ssm_document.aurora_cluster_scheduler.content)) > 0
+    error_message = "Automation document should include the embedded script (handler function)"
   }
 }
