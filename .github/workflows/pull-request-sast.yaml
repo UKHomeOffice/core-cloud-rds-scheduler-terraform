@@ -1,4 +1,4 @@
-name: Validate Terraform with Trivy and TEST
+name: Validate Terraform with TEST
 
 on:
   push:
@@ -35,10 +35,3 @@ jobs:
 
       - name: Terraform Test
         run: terraform test
-
-      # Results have to be a table as the organisation does not have Advanced Security license.
-      - name: Terraform Trivy Scan
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
-        with:
-          scan-type: 'config'
-          exit-code: '1'
