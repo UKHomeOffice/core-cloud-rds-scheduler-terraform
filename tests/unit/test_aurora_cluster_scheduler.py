@@ -6,7 +6,18 @@ from types import SimpleNamespace
 
 
 def load_module():
-    root = pathlib.Path(__file__).resolve().parents[1]
+    # Locate repository root by walking upwards until scripts/aurora_cluster_scheduler.py is found
+    p = pathlib.Path(__file__).resolve().parent
+    root = None
+    while True:
+        candidate = p / "scripts" / "aurora_cluster_scheduler.py"
+        if candidate.exists():
+            root = p
+            break
+        if p.parent == p:
+            raise RuntimeError("Repository root with scripts/aurora_cluster_scheduler.py not found")
+        p = p.parent
+
     module_path = root / "scripts" / "aurora_cluster_scheduler.py"
     spec = importlib.util.spec_from_file_location("aurora_cluster_scheduler", str(module_path))
     module = importlib.util.module_from_spec(spec)
