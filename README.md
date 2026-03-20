@@ -117,10 +117,9 @@ pytest -q
 # or with coverage
 coverage run -m pytest
 coverage report -m
-coverage xml -o coverage.xml
 ```
 
-CI: A GitHub Actions workflow (`.github/workflows/pytest.yml`) runs the pytest suite on push/PR and uploads the test artifacts (pytest log and `coverage.xml`) as a build artifact named `test-artifacts`. You can download these artifacts from the workflow run and attach the logs/coverage output to your Jira ticket as evidence.
+CI: A GitHub Actions workflow (`.github/workflows/pytest.yml`) runs the pytest suite on push/PR and uploads the test artifacts (pytest log) as a build artifact named `test-artifacts`. You can download these artifacts from the workflow run and attach the logs to your Jira ticket as evidence.
 
 
 

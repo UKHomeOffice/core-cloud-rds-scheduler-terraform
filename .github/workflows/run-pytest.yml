@@ -33,7 +33,6 @@ jobs:
         run: |
           mkdir -p test-artifacts
           coverage run -m pytest -q | tee test-artifacts/pytest.log
-          coverage xml -o test-artifacts/coverage.xml
           coverage report -m
 
       - name: Upload test artifacts
