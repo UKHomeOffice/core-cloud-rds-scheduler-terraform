@@ -89,6 +89,61 @@ def test_has_schedule_tag_true_and_false(monkeypatch):
     assert mod.has_schedule_tag(BadClient(), "arn", "Schedule") is False
 
 
+def test_has_schedule_tag_case_sensitivity(monkeypatch):
+    # Objective: verify tag lookup is case-sensitive (lowercase 'schedule' should not match 'Schedule')
+    # Setup: FakeClient returns TagList with lowercase key 'schedule'
+    # Expected: has_schedule_tag returns False for 'Schedule'
+    mod = load_module()
+
+    class LowercaseTagClient:
+        def list_tags_for_resource(self, resource_name=None, **kwargs):
+            _ = resource_name if resource_name is not None else kwargs.get("ResourceName")
+            return {"TagList": [{"Key": "schedule", "Value": "*"}]}
+
+    assert mod.has_schedule_tag(LowercaseTagClient(), "arn:1", "Schedule") is False
+
+
+def test_has_schedule_tag_empty_taglist(monkeypatch):
+    # Objective: ensure empty TagList is treated as no schedule tag
+    # Setup: FakeClient returns TagList as an empty list
+    # Expected: has_schedule_tag returns False
+    mod = load_module()
+
+    class EmptyTagListClient:
+        def list_tags_for_resource(self, resource_name=None, **kwargs):
+            _ = resource_name if resource_name is not None else kwargs.get("ResourceName")
+            return {"TagList": []}
+
+    assert mod.has_schedule_tag(EmptyTagListClient(), "arn:1", "Schedule") is False
+
+
+def test_has_schedule_tag_multiple_entries(monkeypatch):
+    # Objective: ensure the function finds the correct tag among multiple entries
+    # Setup: FakeClient returns multiple tags including 'Schedule'
+    # Expected: has_schedule_tag returns True
+    mod = load_module()
+
+    class MultiTagClient:
+        def list_tags_for_resource(self, resource_name=None, **kwargs):
+            _ = resource_name if resource_name is not None else kwargs.get("ResourceName")
+            return {"TagList": [{"Key": "Env", "Value": "dev"}, {"Key": "Schedule", "Value": "*"}]}
+
+    assert mod.has_schedule_tag(MultiTagClient(), "arn:1", "Schedule") is True
+
+
+def test_has_schedule_tag_unexpected_shape(monkeypatch):
+    # Objective: ensure unexpected shapes from the API are handled safely
+    # Setup: FakeClient returns an empty dict (no TagList key)
+    # Expected: has_schedule_tag returns False rather than raising
+    mod = load_module()
+
+    class BadShapeClient:
+        def list_tags_for_resource(self, resource_name=None, **kwargs):
+            return {}
+
+    assert mod.has_schedule_tag(BadShapeClient(), "arn:1", "Schedule") is False
+
+
 def test_perform_action_with_retry_success(monkeypatch):
     # Objective: ensure perform_action_with_retry calls API and returns new status on success
     # Setup: FakeClient implements start_db_cluster and describe_db_clusters returning 'starting'
@@ -315,3 +370,60 @@ def test_handler_end_to_end(monkeypatch):
     assert out["ProcessedClusters"] == ["c-stoppable"]
     assert out["SkippedClusters"] == []
     assert out["FailedClusters"] == []
+
+
+def test_handler_multiple_discovered_clusters(monkeypatch):
+    # Objective: ensure handler picks up multiple clusters returned by the paginator
+    # Setup: paginator yields a single page with three stoppable+tagged clusters
+    # Expected: all three cluster ids appear in ProcessedClusters when process_cluster returns processed
+    mod = load_module()
+
+    cluster_a = {"DBClusters": [{"DBClusterIdentifier": "a", "EngineMode": "provisioned", "DBClusterArn": "arn:a"}]}
+    cluster_b = {"DBClusters": [{"DBClusterIdentifier": "b", "EngineMode": "provisioned", "DBClusterArn": "arn:b"}]}
+    cluster_c = {"DBClusters": [{"DBClusterIdentifier": "c", "EngineMode": "provisioned", "DBClusterArn": "arn:c"}]}
+
+    class Paginator:
+        def paginate(self):
+            yield {"DBClusters": [cluster_a["DBClusters"][0], cluster_b["DBClusters"][0], cluster_c["DBClusters"][0]]}
+
+    class FakeClient:
+        def get_paginator(self, name):
+            return Paginator()
+
+        def list_tags_for_resource(self, resource_name=None, **kwargs):
+            return {"TagList": [{"Key": "Schedule", "Value": "*"}]}
+
+    fake = FakeClient()
+    monkeypatch.setattr(mod.boto3, "client", lambda *args, **kwargs: fake)
+
+    # Patch process_cluster to mark everything processed
+    monkeypatch.setattr(mod, "process_cluster", lambda c, cid, action: {"cluster_id": cid, "outcome": "processed", "message": "ok", "status": "starting"})
+    monkeypatch.setattr(mod, "time", types.SimpleNamespace(sleep=lambda *_: None))
+
+    out = mod.handler({"Action": "Start", "ScheduleTagKey": "Schedule"}, None)
+    assert set(out["ProcessedClusters"]) == {"a", "b", "c"}
+
+
+def test_process_cluster_with_multiple_describe_entries(monkeypatch):
+    # Objective: show process_cluster uses the first entry from describe_db_clusters
+    # Setup: FakeClient.describe_db_clusters returns multiple DBClusters with differing statuses
+    # Expected: only the first entry's status determines the action decision
+    mod = load_module()
+
+    class FakeClientFirstAvailable:
+        def describe_db_clusters(self, db_cluster_identifier=None, **kwargs):
+            # First entry is available, others are stopped -> start should be skipped
+            return {"DBClusters": [{"Status": mod.STATUS_AVAILABLE}, {"Status": mod.STATUS_STOPPED}, {"Status": mod.STATUS_STOPPED}]}
+
+    res = mod.process_cluster(FakeClientFirstAvailable(), "c1", mod.ACTION_START)
+    assert res["outcome"] == "skipped"
+
+    class FakeClientFirstStopped:
+        def describe_db_clusters(self, db_cluster_identifier=None, **kwargs):
+            # First entry is stopped, others available -> start should proceed (processed)
+            return {"DBClusters": [{"Status": mod.STATUS_STOPPED}, {"Status": mod.STATUS_AVAILABLE}, {"Status": mod.STATUS_AVAILABLE}]}
+
+    # Patch perform_action_with_retry to avoid actual API calls
+    monkeypatch.setattr(mod, "perform_action_with_retry", lambda c, cid, action: mod.STATUS_STARTING)
+    res2 = mod.process_cluster(FakeClientFirstStopped(), "c2", mod.ACTION_START)
+    assert res2["outcome"] == "processed"
